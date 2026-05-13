@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mapa POT — Ciudad de Guatemala</title>
+<script src="https://unpkg.com/maplibre-gl@4.1.0/dist/maplibre-gl.js"></script>
+<link href="https://unpkg.com/maplibre-gl@4.1.0/dist/maplibre-gl.css" rel="stylesheet">
+<script src="https://unpkg.com/pmtiles@3.2.0/dist/pmtiles.js"></script>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: system-ui, sans-serif; display:flex; flex-direction:column; height:100vh; }
+
+#header {
+  background:#1e293b; color:#fff;
+  padding:10px 20px; display:flex;
+  align-items:center; justify-content:space-between; flex-shrink:0;
+}
+#header h1 { font-size:14px; font-weight:500; }
+#header span { font-size:11px; color:#94a3b8; }
+
+#map { flex:1; }
+
+#legend {
+  position:fixed; bottom:28px; left:16px;
+  background:rgba(255,255,255,0.97);
+  border-radius:10px; padding:12px 14px;
+  box-shadow:0 2px 12px rgba(0,0,0,0.12);
+  z-index:1000; font-size:12px;
+}
+#legend h3 { font-size:10px; font-weight:600; color:#64748b; text-transform:uppercase; letter-spacing:.6px; margin-bottom:9px; }
+.li { display:flex; align-items:center; gap:9px; margin-bottom:6px; color:#334155; cursor:pointer; user-select:none; }
+.li:hover { opacity:.75; }
+.dot { width:13px; height:13px; border-radius:3px; flex-shrink:0; transition: opacity .2s; }
+.li.off .dot { opacity:.25; }
+.li.off { color:#94a3b8; }
+
+#panel {
+  position:fixed; top:52px; right:14px;
+  background:rgba(255,255,255,0.97);
+  border-radius:10px; padding:14px 16px;
+  box-shadow:0 2px 12px rgba(0,0,0,0.12);
+  z-index:1000; width:230px; font-size:13px;
+}
+#panel h3 { font-size:10px; font-weight:600; color:#64748b; text-transform:uppercase; letter-spacing:.6px; margin-bottom:10px; }
+.row { display:flex; justify-content:space-between; align-items:center; margin-bottom:5px; }
+.lbl { color:#64748b; font-size:12px; }
+.val { font-weight:500; color:#1e293b; font-size:12px; text-align:right; }
+.badge { display:inline-block; padding:2px 9px; border-radius:5px; font-weight:700; font-size:12px; }
+.metric { margin-top:10px; padding-top:10px; border-top:1px solid #f1f5f9; }
+.metric-label { font-size:10px; color:#94a3b8; text-transform:uppercase; letter-spacing:.5px; margin-bottom:2px; }
+.metric-value { font-size:22px; font-weight:600; color:#1e293b; }
+.hint { color:#94a3b8; font-size:12px; line-height:1.5; }
+
+#zoom-hint {
+  position:fixed; bottom:28px; right:14px;
+  background:rgba(30,41,59,0.85); color:#fff;
+  border-radius:8px; padding:7px 13px;
+  font-size:11px; z-index:1000;
+  display:none;
+}
+</style>
+</head>
+<body>
+
+<div id="header">
+  <h1>Mapa POT — Ciudad de Guatemala</h1>
+  <span>COM-48-2024 · 166,801 predios</span>
+</div>
+
+<div id="map"></div>
+
+<div id="legend">
+  <h3>Zona G — POT</h3>
+  <div class="li" data-zona="G0"><div class="dot" style="background:#2d7a1f"></div>G0 · Sin edificar</div>
+  <div class="li" data-zona="G1"><div class="dot" style="background:#5aab2e"></div>G1 · Baja densidad</div>
+  <div class="li" data-zona="G2"><div class="dot" style="background:#c8d400"></div>G2 · Media-baja</div>
+  <div class="li" data-zona="G3"><div class="dot" style="background:#f5d800"></div>G3 · Media</div>
+  <div class="li" data-zona="G4"><div class="dot" style="background:#f59100"></div>G4 · Media-alta</div>
+  <div class="li" data-zona="G5"><div class="dot" style="background:#e02020"></div>G5 · Alta densidad</div>
+</div>
+
+<div id="panel">
+  <h3>Predio</h3>
+  <div class="hint">Haz clic en un predio<br>para ver su ficha</div>
+</div>
+
+<div id="zoom-hint">Acércate para ver predios individuales</div>
+
+<script>
+const PMTILES_URL = 'https://mpqzlniapptzesbshsic.supabase.co/storage/v1/object/public/pot-tiles/predios_all.pmtiles';
+
+const COLORS = {
+  G0:'#2d7a1f', G1:'#5aab2e', G2:'#c8d400',
+  G3:'#f5d800', G4:'#f59100', G5:'#e02020'
+};
+const TEXT_COLORS = {
+  G0:'#fff', G1:'#fff', G2:'#1a1a00',
+  G3:'#1a1a00', G4:'#fff', G5:'#fff'
+};
+const DESCS = {
+  G0:'Sin edificar / restricción', G1:'Baja densidad',
+  G2:'Media-baja densidad', G3:'Media densidad',
+  G4:'Media-alta densidad', G5:'Alta densidad'
+};
+
+// Registrar protocolo PMTiles
+const protocol = new pmtiles.Protocol();
+maplibregl.addProtocol('pmtiles', protocol.tile);
+
+const map = new maplibregl.Map({
+  container: 'map',
+  style: {
+    version: 8,
+    sources: {
+      osm: {
+        type: 'raster',
+        tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+        tileSize: 256,
+        attribution: '© <a href="https://openstreetmap.org">OpenStreetMap</a> · Mapa POT Guate'
+      }
+    },
+    layers: [{ id: 'osm', type: 'raster', source: 'osm' }]
+  },
+  center: [-90.507, 14.621],
+  zoom: 13,
+  maxZoom: 18,
+  minZoom: 10
+});
+
+map.addControl(new maplibregl.NavigationControl(), 'bottom-right');
+
+// Filtros activos
+const activeZonas = new Set(['G0','G1','G2','G3','G4','G5']);
+
+function buildFilter() {
+  const active = [...activeZonas];
+  if (active.length === 6) return ['has', 'zona_g'];
+  if (active.length === 0) return ['==', 'zona_g', ''];
+  return ['in', ['get', 'zona_g'], ['literal', active]];
+}
+
+map.on('load', () => {
+  map.addSource('predios', {
+    type: 'vector',
+    url: 'pmtiles://' + PMTILES_URL
+  });
+
+  // Capa de relleno
+  map.addLayer({
+    id: 'predios-fill',
+    type: 'fill',
+    source: 'predios',
+    'source-layer': 'predios',
+    paint: {
+      'fill-color': [
+        'match', ['get', 'zona_g'],
+        'G0', '#2d7a1f',
+        'G1', '#5aab2e',
+        'G2', '#c8d400',
+        'G3', '#f5d800',
+        'G4', '#f59100',
+        'G5', '#e02020',
+        '#cccccc'
+      ],
+      'fill-opacity': [
+        'interpolate', ['linear'], ['zoom'],
+        10, 0.75, 16, 0.6
+      ]
+    }
+  });
+
+  // Borde entre predios (solo zoom alto)
+  map.addLayer({
+    id: 'predios-line',
+    type: 'line',
+    source: 'predios',
+    'source-layer': 'predios',
+    minzoom: 14,
+    paint: {
+      'line-color': '#ffffff',
+      'line-width': 0.6,
+      'line-opacity': 0.5
+    }
+  });
+
+  // Capa hover
+  map.addLayer({
+    id: 'predios-hover',
+    type: 'fill',
+    source: 'predios',
+    'source-layer': 'predios',
+    paint: {
+      'fill-color': '#ffffff',
+      'fill-opacity': ['case', ['boolean', ['feature-state', 'hover'], false], 0.35, 0]
+    }
+  });
+
+  // Hint de zoom
+  map.on('zoom', () => {
+    const z = map.getZoom();
+    document.getElementById('zoom-hint').style.display = z < 13 ? 'block' : 'none';
+  });
+});
+
+// Hover
+let hoveredId = null;
+map.on('mousemove', 'predios-fill', e => {
+  map.getCanvas().style.cursor = 'pointer';
+  if (e.features.length > 0) {
+    if (hoveredId !== null) {
+      map.setFeatureState({ source:'predios', sourceLayer:'predios', id: hoveredId }, { hover: false });
+    }
+    hoveredId = e.features[0].id;
+    map.setFeatureState({ source:'predios', sourceLayer:'predios', id: hoveredId }, { hover: true });
+  }
+});
+map.on('mouseleave', 'predios-fill', () => {
+  map.getCanvas().style.cursor = '';
+  if (hoveredId !== null) {
+    map.setFeatureState({ source:'predios', sourceLayer:'predios', id: hoveredId }, { hover: false });
+    hoveredId = null;
+  }
+});
+
+// Click en predio
+map.on('click', 'predios-fill', e => {
+  if (!e.features.length) return;
+  const p = e.features[0].properties;
+  const g = p.zona_g;
+  const color = COLORS[g] || '#ccc';
+  const tc = TEXT_COLORS[g] || '#000';
+  const construible = (p.area_m2 && p.ie_max) ? (p.area_m2 * p.ie_max).toLocaleString('es-GT') + ' m²' : '—';
+  document.getElementById('panel').innerHTML = `
+    <h3>Predio seleccionado</h3>
+    <div class="row"><span class="lbl">NCM</span><span class="val" style="font-family:monospace;font-size:11px">${p.ncm||'—'}</span></div>
+    <div class="row">
+      <span class="lbl">Zona G</span>
+      <span class="badge" style="background:${color};color:${tc}">${g}</span>
+    </div>
+    <div class="row"><span class="lbl">Uso</span><span class="val" style="max-width:130px;font-size:11px">${DESCS[g]||'—'}</span></div>
+    <div class="row"><span class="lbl">Zona municipal</span><span class="val">Zona ${p.zona||'—'}</span></div>
+    <div class="row"><span class="lbl">Área del predio</span><span class="val">${p.area_m2 ? Number(p.area_m2).toLocaleString('es-GT')+' m²' : '—'}</span></div>
+    <div class="row"><span class="lbl">IE máximo</span><span class="val">${p.ie_max != null ? p.ie_max+'x' : '—'}</span></div>
+    <div class="row"><span class="lbl">Altura permitida</span><span class="val">${p.alt_perm ? p.alt_perm+' m' : '—'}</span></div>
+    <div class="metric">
+      <div class="metric-label">Área construible máxima</div>
+      <div class="metric-value">${construible}</div>
+    </div>
+  `;
+});
+
+map.on('click', e => {
+  const f = map.queryRenderedFeatures(e.point, { layers: ['predios-fill'] });
+  if (!f.length) {
+    document.getElementById('panel').innerHTML = `
+      <h3>Predio</h3>
+      <div class="hint">Haz clic en un predio<br>para ver su ficha</div>
+    `;
+  }
+});
+
+// Filtros en leyenda — clic para activar/desactivar
+document.querySelectorAll('.li[data-zona]').forEach(el => {
+  el.addEventListener('click', () => {
+    const zona = el.dataset.zona;
+    if (activeZonas.has(zona)) {
+      activeZonas.delete(zona);
+      el.classList.add('off');
+    } else {
+      activeZonas.add(zona);
+      el.classList.remove('off');
+    }
+    if (map.getLayer('predios-fill')) {
+      map.setFilter('predios-fill', buildFilter());
+      map.setFilter('predios-line', buildFilter());
+      map.setFilter('predios-hover', buildFilter());
+    }
+  });
+});
+</script>
+</body>
+</html>
