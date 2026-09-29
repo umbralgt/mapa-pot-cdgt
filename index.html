@@ -165,7 +165,8 @@ body {
   background: #fff !important; color: #0a0a0a !important;
 }
 .maplibregl-ctrl-group button:hover { background: #f0f0f0 !important; }
-.maplibregl-ctrl-attrib { display: none !important; }
+.maplibregl-ctrl-attrib { font-family: inherit; font-size: 9px; }
+.maplibregl-ctrl-attrib.maplibregl-compact { background: rgba(255,255,255,.85); }
 
 /* ── Zoom hint ───────────────────────────────────────────────── */
 #zoom-hint {
@@ -250,18 +251,10 @@ maplibregl.addProtocol('pmtiles', protocol.tile);
 
 const map = new maplibregl.Map({
   container: 'map',
-  style: {
-    version: 8,
-    sources: {
-      osm: {
-        type: 'raster',
-        tiles: ['https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png'],
-        tileSize: 256,
-        attribution: '© OpenStreetMap contributors, © CARTO'
-      }
-    },
-    layers: [{ id: 'osm', type: 'raster', source: 'osm' }]
-  },
+  // Mapa de fondo: OpenFreeMap Positron — gratuito, sin clave y sin límites.
+  // (CARTO empezó a exigir clave en 2026 y mostraba "API KEY REQUIRED".)
+  style: 'https://tiles.openfreemap.org/styles/positron',
+  attributionControl: false,
   center: [-90.507, 14.621],
   zoom: 13,
   maxZoom: 18,
@@ -269,6 +262,7 @@ const map = new maplibregl.Map({
 });
 
 map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
+map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right');
 
 // Filtros activos
 const activeZonas = new Set(['G0','G1','G2','G3','G4','G5']);
@@ -293,6 +287,9 @@ function buildCalcURL(p, g) {
 }
 
 map.on('load', () => {
+  // Los predios se dibujan debajo de las etiquetas (nombres de calles y colonias)
+  const primeraEtiqueta = (map.getStyle().layers.find(l => l.type === 'symbol') || {}).id;
+
   map.addSource('predios', {
     type: 'vector',
     url: 'pmtiles://' + PMTILES_URL
@@ -311,7 +308,7 @@ map.on('load', () => {
       ],
       'fill-opacity': ['interpolate',['linear'],['zoom'], 10,0.75, 16,0.55]
     }
-  });
+  }, primeraEtiqueta);
 
   map.addLayer({
     id: 'predios-line',
@@ -320,7 +317,7 @@ map.on('load', () => {
     'source-layer': 'predios',
     minzoom: 14,
     paint: { 'line-color':'#fff','line-width':0.6,'line-opacity':0.5 }
-  });
+  }, primeraEtiqueta);
 
   map.addLayer({
     id: 'predios-hover',
@@ -331,7 +328,7 @@ map.on('load', () => {
       'fill-color': '#0a0a0a',
       'fill-opacity': ['case',['boolean',['feature-state','hover'],false],0.25,0]
     }
-  });
+  }, primeraEtiqueta);
 
   // Contorno del predio seleccionado
   map.addLayer({
@@ -344,7 +341,7 @@ map.on('load', () => {
       'line-width': 2.5,
       'line-opacity': ['case',['boolean',['feature-state','selected'],false],1,0]
     }
-  });
+  }, primeraEtiqueta);
 
   map.on('zoom', () => {
     const z = map.getZoom();
