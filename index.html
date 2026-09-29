@@ -217,7 +217,9 @@ body {
 <div id="zoom-hint">Acercate para ver predios individuales</div>
 
 <script>
-const PMTILES_URL = 'https://mpqzlniapptzesbshsic.supabase.co/storage/v1/object/public/pot-tiles/predios_all.pmtiles';
+// V2: el archivo vive en el mismo repositorio de GitHub (ya no depende de Supabase, que pausa proyectos inactivos).
+// Incluye ancho, largo y regularidad de cada predio, calculados desde su forma completa.
+const PMTILES_URL = new URL('predios.pmtiles', window.location.href).href;
 
 // URL de la calculadora — ajustar cuando esté en producción
 const CALC_URL = 'https://calculadora-pot.umbralgt.com';
@@ -240,7 +242,7 @@ const DESCS = {
 };
 
 // IE máximo por zona (referencia POT)
-const IE_REF = { G0:0, G1:0.5, G2:1.5, G3:2.5, G4:4, G5:6 };
+const IE_REF = { G0:0, G1:1.2, G2:1.8, G3:2.7, G4:4, G5:6 }; // IE base POT (igual que la calculadora)
 
 // Protocolo PMTiles
 const protocol = new pmtiles.Protocol();
@@ -286,6 +288,7 @@ function buildCalcURL(p, g) {
   if (p.ie_max)  params.set('ie', p.ie_max);
   if (p.alt_perm) params.set('alt', p.alt_perm);
   if (p.zona)    params.set('zona_postal', p.zona);
+  if (p.ancho && p.largo) { params.set('ancho', p.ancho); params.set('largo', p.largo); }
   return `${CALC_URL}?${params.toString()}`;
 }
 
@@ -387,10 +390,15 @@ map.on('click', 'predios-fill', e => {
   map.setFeatureState({ source:'predios', sourceLayer:'predios', id: selectedId }, { selected: true });
 
   // Área construible máxima
+  // V2: base (sin trámites) = lo que usa la calculadora; máximo = con incentivos
   const ie = p.ie_max || IE_REF[g] || '—';
-  const construible = (p.area_m2 && ie && ie !== '—')
-    ? Math.round(p.area_m2 * ie).toLocaleString('es-GT') + ' m²'
+  const ieBase = IE_REF[g];
+  const construible = (p.area_m2 && ieBase)
+    ? Math.round(p.area_m2 * ieBase).toLocaleString('es-GT') + ' m²'
     : '—';
+  const construibleMax = (p.area_m2 && p.ie_max && p.ie_max > ieBase)
+    ? Math.round(p.area_m2 * p.ie_max).toLocaleString('es-GT') + ' m²'
+    : null;
 
   // URL de la calculadora con datos del predio
   const calcURL = buildCalcURL(p, g);
@@ -419,18 +427,23 @@ map.on('click', 'predios-fill', e => {
       <span class="val">${p.area_m2 ? Number(p.area_m2).toLocaleString('es-GT') + ' m²' : '—'}</span>
     </div>
     <div class="row">
-      <span class="lbl">IE máximo</span>
+      <span class="lbl">IE máx. (con incentivos)</span>
       <span class="val">${p.ie_max != null ? p.ie_max + 'x' : '—'}</span>
     </div>
+    <div class="row">
+      <span class="lbl">Medidas aprox.</span>
+      <span class="val">${p.ancho && p.largo ? Math.round(p.ancho) + ' × ' + Math.round(p.largo) + ' m' : '—'}</span>
+    </div>
+    ${p.regular != null && p.regular < 0.85 ? '<div class="row"><span class="lbl" style="text-transform:none;letter-spacing:0">Forma irregular: medidas aproximadas</span></div>' : ''}
     <div class="row" style="border-bottom:none;margin-bottom:0;padding-bottom:0">
       <span class="lbl">Altura permitida</span>
       <span class="val">${p.alt_perm ? p.alt_perm + ' m' : '—'}</span>
     </div>
 
     <div class="metric">
-      <div class="metric-label">Área construible máxima</div>
+      <div class="metric-label">Área construible (base)</div>
       <div class="metric-value">${construible}</div>
-      <div class="metric-sub">IE ${ie !== '—' ? ie + 'x' : '—'} × ${p.area_m2 ? Number(p.area_m2).toLocaleString('es-GT') + ' m²' : '—'} de terreno</div>
+      <div class="metric-sub">IE ${ieBase != null ? ieBase + 'x' : '—'} × ${p.area_m2 ? Number(p.area_m2).toLocaleString('es-GT') + ' m²' : '—'} de terreno${construibleMax ? '<br>Con incentivos: hasta ' + construibleMax + ' (IE ' + p.ie_max + 'x)' : ''}</div>
     </div>
 
     <a class="btn-calcular" href="${calcURL}" target="_blank" rel="noopener">
