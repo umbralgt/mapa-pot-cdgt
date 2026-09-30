@@ -275,6 +275,23 @@ function buildFilter() {
 }
 
 // Construir URL de la calculadora con parámetros del predio
+// Dirección de la herramienta "Mi terreno 3D" (cambiala si usás otro subdominio)
+const URL_3D = 'https://terreno3d.umbralgt.com';
+function build3DURL(p, g, feat) {
+  const geom = feat.geometry;
+  const ring = geom.type === 'Polygon' ? geom.coordinates[0] : geom.coordinates[0][0];
+  const cx = ring.reduce((s, q) => s + q[0], 0) / ring.length;
+  const cy = ring.reduce((s, q) => s + q[1], 0) / ring.length;
+  const params = new URLSearchParams();
+  if (p.ncm) params.set('ncm', p.ncm);
+  params.set('c', cx.toFixed(6) + ',' + cy.toFixed(6));
+  if (g) params.set('zona', g);
+  if (p.area_m2) params.set('area', Math.round(p.area_m2));
+  if (p.zona) params.set('zona_postal', p.zona);
+  if (p.ancho && p.largo) { params.set('ancho', p.ancho); params.set('largo', p.largo); }
+  return URL_3D + '?' + params.toString();
+}
+
 function buildCalcURL(p, g) {
   const params = new URLSearchParams();
   if (g)         params.set('zona', g);
@@ -398,7 +415,10 @@ map.on('click', 'predios-fill', e => {
     : null;
 
   // URL de la calculadora con datos del predio
-  const calcURL = buildCalcURL(p, g);
+  const url3D = build3DURL(p, g, feat);
+  // V15: la calculadora recibe también el NCM y la ubicación, para abrir luego la forma real en 3D
+  const cParam = new URL(url3D).searchParams.get('c');
+  const calcURL = buildCalcURL(p, g) + (p.ncm ? '&ncm=' + encodeURIComponent(p.ncm) : '') + (cParam ? '&c=' + encodeURIComponent(cParam) : '');
 
   document.getElementById('panel').innerHTML = `
     <h3>Predio seleccionado</h3>
@@ -445,6 +465,10 @@ map.on('click', 'predios-fill', e => {
 
     <a class="btn-calcular" href="${calcURL}" target="_blank" rel="noopener">
       <span>Calcular potencial</span>
+      <span>→</span>
+    </a>
+    <a class="btn-calcular-sub" href="${url3D}" target="_blank" rel="noopener">
+      <span>Ver en 3D</span>
       <span>→</span>
     </a>
     <a class="btn-calcular-sub" href="${calcURL}&modo=pro" target="_blank" rel="noopener">
